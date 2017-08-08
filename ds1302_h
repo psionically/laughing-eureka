@@ -1,0 +1,16 @@
+/*
+ * ds1302.h
+*/
+
+//---------------------------------------------------------------------------------------
+ubyte bcd2bin (ubyte data)
+{
+  return((data & 0x0F) + (((data >> 4) & 0x0F) * 10)); // >> == bit shifting right; could also divide by 16 here
+}    
+
+//---------------------------------------------------------------------------------------
+ubyte bin2bcd
+{
+  int tensDigit = data/10;
+  return(data - (tensDigit * 10) + (tensDigit << 4)); 
+}  
