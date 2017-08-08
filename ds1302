@@ -1,0 +1,251 @@
+/*
+ * ds1302.c
+*/
+
+/*
+ * Initialize the ds1302 RTC registers and set the default time and date. It will
+ * also zero the 31 bytes of scratchpad memory(RAM) with a burst write
+ * (erase and invalidate)
+ * The RTC supports individual access to RAM, we always use burst I/O
+*/
+void defaultRTC(ubyte month, ubyte day, ubyte yr, ubyte dow, ubyte hr, 
+    ubyte min, ubyte sec)
+{
+    ubyte data[31];
+
+    //"belt and suspenders" automatically set to output but set anyways
+    set_direction(RTC_CLK, PIN_OUT);
+    set_direction(RTC_DAT, PIN_OUT);
+    set_direction(RTC_CE, PIN_OUT);
+    
+    data[0] = '\0';
+    writeRTC(CMD_WRITE_WP, data, 1);    //could have just sent a zero but just in case something wierd going on
+    
+    data[0] = 0xA5;     //trickle charger ON with 1 diode, 2K ohms
+    writeRTC(CMD_WRITE_TCS, data, 1);
+    
+    writeTime(hr, min, sec);
+    writeDate(month, day, yr, dow);
+    
+    memset(data, '\0', 31);         //does same thing as bzero but with different parameters
+    writeRTC(CMD_WRITE_RAM, data, 31);
+    
+}
+
+
+/*
+ * This function is going to write 31 bytes of data to the scratchpad RAM 
+*/ 
+void saveConfig(ubyte data[])
+{
+    //use first byte as flag for if valid configuration already set (used when power goes out and need to reboot)
+    //also saves whether alarm is set and hours and minutes
+   
+    data[0] = 0xAA; 
+    writeRTC(CMD_WRTIE_RAM, data, 31); 
+    
+}
+
+/*
+ * Read 31 bytes of data from the scratchpad RAM 
+*/
+int getConfig(ubyte data[])
+{
+    memset(data, '\0', 31); //pointer to memory we want to set, value you want to write, how many of them you want to write
+    readRTC(CMD_READ_RAM, data, 31);
+    
+    return (data[0] == 0xAA); 
+}
+
+/*
+ * Write time to display
+*/
+void writeTime(ubyte hr, ubyte min, ubyte sec)
+{
+    ubyte data[1];
+
+    data[0] = bin2bcd(hr) & 0x3F;       //enable 24 hr mode
+    writeRTC(RTC_WRITE_HRS, data, 1);
+    data[0] = bin2bcd(min);
+    writeRTC(RTC_WRITE_MINS, data, 1);
+    data[0] = bin2bcd(sec) & 0x7F;      //clock halt disabled
+    writeRTC(RTC_WRITE_SECS, data, 1);
+}
+
+/*
+ * Read time
+*/
+void readTime(ubyte *hr, ubyte *min, ubyte *sec)
+{
+    ubyte data[1] = {'\0'};
+
+    readRTC(RTC_READ_HRS, data, 1);
+    *hr = bcd2bin(data[0]);
+    readRTC(RTC_READ_MINS, data, 1);
+    *min = bcd2bin(data[0]);
+    readRTC(RTC_READ_SECS, data, 1);
+    *sec = bcd2bin(data[0]);
+
+    
+}
+
+/*
+ * Write date to clock
+*/
+void writeDate(ubyte month, ubyte day, ubyte year, ubyte dow)
+{
+    ubyte data[1];
+
+    data[0] = bin2bcd(month);
+    writeRTC(RTC_WRITE_MTH, data, 1);
+    data[0] = bin2bcd(day);
+    writeRTC(RTC_WRITE_DAY, data, 1);
+    data[0] = bin2bcd(year);
+    writeRTC(RTC_WRITE_YR, data, 1);
+    data[0] = bin2bcd(dow);
+    writeRTC(RTC_WRITE_DOW, data, 1);
+}
+
+/*
+ * Read date
+*/
+void readDate(ubyte *month, ubyte *day, ubyte *year, ubyte *dow)
+{
+    ubyte data[1] = {'\0'};
+
+    readRTC(READ_RTC_MTH, data, 1);
+    *month = bcd2bin(data[0]);
+    readRTC(READ_RTC_DAY, data, 1);
+    *day = bcd2bin(data[0]);
+    readRTC(READ_RTC_YR, data, 1);
+    *year = bcd2bin(data[0]);
+    readRTC(READ_RTC_DOW, data, 1);
+    *dow = bcd2bin(data[0]);   
+}
+
+/*
+ * Write RTC
+*/
+void writeRTC(ubyte command, ubyte data[], ubyte datalen)
+{
+    high(RTC_CE);
+    
+    for(int i = 0; i < datalen; i++)
+    {
+        if (command & 0x01) //0x01 is just the number one; conventional to use Hex.
+        {
+            high(RTC_DAT);
+        } 
+
+        else
+        {
+            low(RTC_DAT);
+        }
+        
+        high(RTC_CLK);
+        command =  command >> 1; // shift command byte by 1 (like writing A = A + 1)
+        low(RTC_CLK);
+    }
+    
+    
+    for (int i = 0; i < datalen; i++)
+    {
+        ubyte oneByte = data[i];
+        
+        for (int j = 0; j < 8; j++)
+        {
+            if (oneByte & 0x01)
+            {
+                high(RTC_DAT);
+            }
+        
+            else
+            {
+                low(RTC_DAT);
+            }
+        
+            high(RTC_CLK);
+            oneByte = oneByte >> 1;
+            low(RTC_CLK);       
+        }
+      
+        low(RTC_CE); 
+    }   
+}
+
+/*
+ * Read RTC
+*/
+void readRTC(ubyte command, ubyte data[], ubyte datalen)
+{
+    high(RTC_CE);
+    for(int i = 0; i < 8; i++)
+    {
+        if (command & 0x01) //0x01 is just the number one; conventional to use Hex.
+        {
+            high(RTC_DAT);
+        } 
+
+        else
+        {
+            low(RTC_DAT);
+        }
+        
+        high(RTC_CLK);
+        command =  command >> 1; // shift command byte by 1 (like writing A = A + 1)
+        low(RTC_CLK);
+    }
+    
+    set_direction(RTC_DAT, PIN_IN);
+    
+    for(int i = 0; i < datalen; i++)
+    {
+        ubyte newByte = '\0'; // null character
+        
+        for(int j = 0; j < 8; j++)
+        {
+            if (input(RTC_DAT) & 0x01)
+            {
+                newByte = (newByte << 1) + 1;          //0000 0000 + 1 
+            }
+            
+            else
+            {
+                newByte = (newByte << 1); // add zero
+            }
+            
+            high(RTC_CLK);
+            low(RTC_CLK); 
+        }
+        
+        data[i] = reverseByte(newByte); //write reverseByte function 
+    }
+    
+    set_direction(RTC_DAT, PIN_OUT);
+    low(RTC_CE); 
+}
+
+/*
+ * Reverse byte
+*/
+ubyte reverseByte(ubyte byte)
+{
+    ubyte newByte = '\0';
+    
+    for (int i = 0; i < 8; i++)
+    {   
+        if (byte & 0x01)
+        {
+            newByte = (newByte << 1) + 1;
+        }
+        
+        else
+        {
+            newByte = (newByte << 1);
+        }
+        
+        byte = byte >> 1;
+    }
+    
+    return newByte; 
+}
